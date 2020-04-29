@@ -1,4 +1,4 @@
-from numpy import sum, power, array, pi, exp, subtract, divide, argmin, argmax, log, mean, linspace, round, absolute, sqrt, maximum, zeros, diag, inf
+from numpy import sum, power, array, pi, exp, subtract, divide, argmin, argmax, log, mean, linspace, round, absolute, sqrt, maximum, zeros, diag, inf, std
 from numpy.fft import fft2, ifft2, fftshift
 import matplotlib.pyplot as plt
 from matplotlib.image import imread
@@ -77,9 +77,9 @@ def log_integrate_1D(image):
 
 def AOI_crop(image, center, widths):
     if widths[0] < 250:
-        widths[0] = 250
+        widths[0] = 500
     if widths[1] < 250:
-        widths[1] = 250
+        widths[1] = 500
     
     x1, x2, y1, y2 = center[0] - widths[0] / 2, center[0] + widths[0] / 2, center[1] - widths[1] / 2, center[1] + widths[1] / 2
     
@@ -97,7 +97,8 @@ def AOI_crop(image, center, widths):
 
 def AOI_integration(image, center, widths, detuning, mag, v = 'no'):
         
-    cropped_image = gaussian_filter(AOI_crop(image, center, widths), sigma = 3)
+    #cropped_image = gaussian_filter(AOI_crop(image, center, widths), sigma = 3)
+    cropped_image = image
     
     s1 = -sum(sum(log(cropped_image), 0), 0)
     sigma = ( 3 * (2 * pi / k)**2 / (2 * pi) ) / (1 + (2 * detuning * 2 * pi * 10.**6 / Gamma)**2)
@@ -535,6 +536,7 @@ def fit_progression(mypath, mag, detuning, times, v = 'no', offset = 0, AOI = [0
     error_xs = []
     error_ys = []
     atom_num = []
+    N_c = []
     
     x1, y1, x2, y2 = AOI
     
@@ -544,14 +546,14 @@ def fit_progression(mypath, mag, detuning, times, v = 'no', offset = 0, AOI = [0
         
     names = group_names(names)
     print (names)
-    atoms = gaussian_filter(transmission(mypath, names[0])[int(y1):int(y2),int(x1):int(x2)], sigma = 3)
+    atoms = gaussian_filter(transmission(mypath, names[0])[int(y1):int(y2),int(x1):int(x2)], sigma = 0)
     center = find_center(atoms)
     
     scattering_cs = ( 3 * (2 * pi / k)**2 / (2 * pi) )
     
     if fit == 'thermal' or fit == 'thermalBEC':
         for i in names:
-            atoms = gaussian_filter(transmission(mypath, i)[int(y1):int(y2),int(x1):int(x2)], sigma = 3)
+            atoms = gaussian_filter(transmission(mypath, i)[int(y1):int(y2),int(x1):int(x2)], sigma = 0)
 
             if fit == 'thermal':
                 A_x, sigma_x, h_x, x0, error_sigma_x, A_y, sigma_y, h_y, y0, error_sigma_y = fit_1D_gaussians(atoms, center, no_h = 'no')
@@ -573,6 +575,7 @@ def fit_progression(mypath, mag, detuning, times, v = 'no', offset = 0, AOI = [0
                 if v == 'yes':
                     print ("Integrated number along x in millions", n_c_x * 10.**-6, "Condensate Fraction:", n_c_x / (n_c_x + n_th_x))
                     print ("Integrated number along y in millions", n_c_y * 10.**-6, "Condensate Fraction:", n_c_y / (n_c_y + n_th_y))
+                N_c.append( (n_c_x + n_c_y) * 0.5 * 10.**-6)
                 error_sigma_x = sqrt(pcov_thermal[0, 1, 1])
                 error_sigma_y = sqrt(pcov_thermal[1, 1, 1])
                 
@@ -602,11 +605,12 @@ def fit_progression(mypath, mag, detuning, times, v = 'no', offset = 0, AOI = [0
             print ("T_x (uK):", t_x, "T_y (uK):", t_y)
             print ("Average Temperature (uK):", (t_x + t_y) / 2,"Atom Number(millions):", atom_num)
 
-        return t_x, t_y, atom_num
+        return t_x, t_y, atom_num, N_c
     
     elif fit == 'BECOnly':
+        N_c = []
         for i in names:
-            atoms = gaussian_filter(transmission(mypath, i)[int(y1):int(y2),int(x1):int(x2)], sigma = 3)
+            atoms = gaussian_filter(transmission(mypath, i)[int(y1):int(y2),int(x1):int(x2)], sigma = 0)
             no_h_value = 'no'
             
             if v == 'yes':
@@ -621,9 +625,20 @@ def fit_progression(mypath, mag, detuning, times, v = 'no', offset = 0, AOI = [0
                 R_x, x0_x, TF0_x, h_x = popt_TFOnly[0, 0], popt_TFOnly[0, 1], popt_TFOnly[0, 2], popt_TFOnly[0, 3]
                 R_y, x0_y, TF0_y, h_y = popt_TFOnly[1, 0], popt_TFOnly[1, 1], popt_TFOnly[1, 2], popt_TFOnly[1, 3]
             
-            atom_num.append( AOI_integration( atoms, center, [R_x * 1.5, R_y * 1.5], detuning, mag, v = v ) )
+            if v == 'yes':
+                n_c_x = 16./15 * R_x * (pixel / mag)**2 * TF0_x  / scattering_cs * 10.**-6
+                n_c_y = 16./15 * R_y * (pixel / mag)**2 * TF0_y / scattering_cs * 10.**-6
+                print ("Integrated number along x in millions", n_c_x * 10.**-6)
+                print ("Integrated number along y in millions", n_c_y * 10.**-6)
+                print (x0_x, x0_y)
             
-        return 0, 0, atom_num
+            a_num = AOI_integration( atoms, center, [R_x * 1.5, R_y * 1.5], detuning, mag, v = v )
+            if v == 'yes':
+                print("Total integrated atom number in millions:", a_num )
+            atom_num.append( a_num )
+            N_c.append( (n_c_x + n_c_y) * 0.5 *10.**-6 )
+            
+        return 0, 0, atom_num, N_c
     
     else:
         return
@@ -649,12 +664,12 @@ def main():
     #times = power(array([2,3,4,5,6,7]) + repump_time, 2)
     #times = power(array([11, 12, 13]) + repump_time, 2)
     #times = power(array([8,9,10,11,12,13,14,15,16,17,18]) + repump_time, 2)
-    times = power(array([20]) + repump_time, 2)
+    times = power(array([1]) + repump_time, 2)
     
-    mypath = 'C:/Users/Columbia/Documents/Imaging/Raw Data/2019-10-30'
+    mypath = 'C:/Users/Columbia/Documents/Imaging/Raw Data/2019-12-13'
     #C:/Users/Columbia/Documents/For Analysis/2019-10-17T141613-3
     n = 1
-    AOI = [400, 300, 800, 800]
+    AOI = [400, 400, 700, 900]
     
     #Ns, Ts = fit_widths(mypath, mag, detuning, i_s = linspace(-n, -1, n), v = 'yes', time = 10.4)
     #print (round(array(Ns), 2).tolist())
@@ -666,15 +681,14 @@ def main():
     #    print (i, t_x, t_y, t_x / 2 + t_y / 2, num)
     
     #t_x, t_y, num = fit_progression(mypath, mag, detuning, times, v = 'yes', offset = 0, fit = 'thermal')
-    t_x, t_y, num = fit_progression(mypath, mag, detuning, times, v = 'yes', offset = 0, fit = 'thermalBEC', AOI = AOI)
+    t_x, t_y, num, N_c = fit_progression(mypath, mag, detuning, times, v = 'yes', offset = 0, fit = 'BECOnly', AOI = AOI)
     #t_x, t_y, num = fit_progression(mypath, mag, detuning, times, v = 'yes', offset = 0, fit = 'BECOnly')
     
     plt.show()
-    print('I dont understand dipole traps. - Niccolo Bigagli')
     #print ('temperature (uK)', 'Number (10^6)')
     #print (t_x / 2 + t_y / 2, mean(num), num, t_x, t_y)
     
     #plot_progression(times, sigma_xs, error_xs, fits_x, sigma_ys, error_ys, fits_y)
-    
+    print(mean(num), mean(N_c), std(N_c))
 if __name__ == "__main__":
     main()
